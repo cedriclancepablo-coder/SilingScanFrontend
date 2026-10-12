@@ -43,5 +43,31 @@ model is connected. The frontend displays this as an explicit unavailable
 message rather than presenting fabricated predictions.
 
 For production, run `npm run build` and `npm start`. Set `VITE_API_URL` in the
-frontend to the deployed API's `/api` URL. The development CORS configuration
-allows local frontend origins only.
+frontend to the deployed API's `/api` URL. The API allows local development
+origins and any exact origins listed in the comma-separated `CORS_ORIGINS`
+environment variable.
+
+## Deploying the API to Render
+
+The frontend is hosted separately on GitHub Pages. To deploy this API:
+
+1. Create a Neon PostgreSQL database and copy its connection string.
+2. In Render, create a new Blueprint and connect the SilingScan GitHub
+   repository. Render reads the root `render.yaml` and creates the API service.
+3. Set the service's `DATABASE_URL` to the Neon connection string. Keep this
+   value private. Optionally set both `ADMIN_EMAIL` and `ADMIN_PASSWORD` to
+   provision the private administrator account.
+4. Initialize the database schema by running `npm run db:push` from this
+   directory with `DATABASE_URL` set to the Neon database.
+5. Wait for the Render service to deploy, then check
+   `https://<your-render-service>.onrender.com/api/health`. It should return
+   `{"status":"ok"}`.
+6. In GitHub, open **Settings > Secrets and variables > Actions > Variables**
+   for the repository and create `VITE_API_URL` with the value
+   `https://<your-render-service>.onrender.com/api`.
+7. Run the **Deploy SilingScan to GitHub Pages** workflow from the Actions tab
+   to rebuild the frontend with the deployed API URL.
+
+The Render Blueprint allows the GitHub Pages origin for browser requests.
+Image diagnosis remains unavailable until a trained disease-detection model
+is connected.

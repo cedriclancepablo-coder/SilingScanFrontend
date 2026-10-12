@@ -22,6 +22,12 @@ import { analyzePepperImage } from "./model.js";
 import type { PublicUser, ScanHistoryEntry } from "./types.js";
 
 const maximumImageSize = 5 * 1024 * 1024;
+const configuredOrigins = new Set(
+  (process.env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maximumImageSize, files: 1 },
@@ -75,12 +81,14 @@ export const createApp = () => {
 
   app.use((request, response, next) => {
     const origin = request.header("origin");
-    if (
-      origin &&
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
-    ) {
-      response.header("Access-Control-Allow-Origin", origin);
+    if (origin) {
       response.header("Vary", "Origin");
+      if (
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        configuredOrigins.has(origin)
+      ) {
+        response.header("Access-Control-Allow-Origin", origin);
+      }
     }
     response.header(
       "Access-Control-Allow-Headers",
