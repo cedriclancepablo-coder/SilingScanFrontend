@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
+import { ArrowUpRight, Sprout } from "lucide-react";
 import { useNavigate } from "react-router";
-import { getCurrentUser } from "../lib/auth";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
 import type { ScanResult } from "../lib/scan";
 
 type StoredResult = {
@@ -8,161 +16,420 @@ type StoredResult = {
   result: ScanResult;
 };
 
+type CareStatus = "Urgent" | "In progress" | "Scheduled" | "Done";
+type Severity = "Severe" | "Moderate" | "Mild" | "Healthy";
+type StatusFilter = "All" | CareStatus;
+
+type CarePlanRow = {
+  plant: string;
+  disease: string;
+  severity: Severity;
+  instructions: string;
+  frequency: string;
+  nextDue: string;
+  status: CareStatus;
+};
+
+const sampleCarePlan: CarePlanRow[] = [
+  {
+    plant: "Bed A - Siling Labuyo",
+    disease: "Anthracnose",
+    severity: "Severe",
+    instructions:
+      "Remove and bag infected fruit. Apply a fungicide labeled for chili, following the label.",
+    frequency: "Every 7 days",
+    nextDue: "14 Oct 2026",
+    status: "Urgent",
+  },
+  {
+    plant: "Bed A - Siling Labuyo",
+    disease: "Bacterial leaf spot",
+    severity: "Moderate",
+    instructions:
+      "Water at the base only. Avoid touching wet plants. Disinfect pruning tools.",
+    frequency: "Daily check",
+    nextDue: "15 Oct 2026",
+    status: "In progress",
+  },
+  {
+    plant: "Bed B - Siling Haba",
+    disease: "Leaf curl",
+    severity: "Mild",
+    instructions:
+      "Inspect the underside of leaves for mites and whiteflies. Spray with neem oil in the evening.",
+    frequency: "Every 5 days",
+    nextDue: "16 Oct 2026",
+    status: "Scheduled",
+  },
+  {
+    plant: "Bed B - Siling Haba",
+    disease: "Cercospora leaf spot",
+    severity: "Mild",
+    instructions:
+      "Prune lower leaves to improve airflow and clear fallen leaves around the plant.",
+    frequency: "Once",
+    nextDue: "12 Oct 2026",
+    status: "Done",
+  },
+  {
+    plant: "Bed C - Siling Labuyo",
+    disease: "Powdery mildew",
+    severity: "Moderate",
+    instructions:
+      "Space plants wider. Apply sulfur-based spray if humidity stays high.",
+    frequency: "Every 10 days",
+    nextDue: "18 Oct 2026",
+    status: "Scheduled",
+  },
+];
+
+const summaryStatuses: CareStatus[] = [
+  "Urgent",
+  "In progress",
+  "Scheduled",
+  "Done",
+];
+
+const statusFilters: StatusFilter[] = ["All", ...summaryStatuses];
+
+const isStoredResult = (value: unknown): value is StoredResult => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const stored = value as Record<string, unknown>;
+  if (
+    typeof stored.imageUrl !== "string" ||
+    typeof stored.result !== "object" ||
+    stored.result === null
+  ) {
+    return false;
+  }
+
+  const result = stored.result as Record<string, unknown>;
+  return (
+    (result.status === "Healthy" || result.status === "Diseased") &&
+    typeof result.confidence === "number" &&
+    typeof result.summary === "string" &&
+    typeof result.urgency === "string" &&
+    Array.isArray(result.recommendations) &&
+    result.recommendations.every((item) => typeof item === "string")
+  );
+};
+
+const getScanCarePlan = (scan: StoredResult): CarePlanRow[] => {
+  const healthy = scan.result.status === "Healthy";
+  const urgency = scan.result.urgency.toLowerCase();
+  const severity: Severity = healthy
+    ? "Healthy"
+    : urgency.includes("high") || urgency.includes("severe")
+      ? "Severe"
+      : urgency.includes("medium") || urgency.includes("moderate")
+        ? "Moderate"
+        : "Mild";
+
+  return [
+    {
+      plant: "Scanned plant - Siling Labuyo",
+      disease: healthy ? "No disease detected" : "Needs attention",
+      severity,
+      instructions:
+        scan.result.recommendations.join(" ") || scan.result.summary,
+      frequency: "Follow scan guidance",
+      nextDue: "After next check",
+      status: "Scheduled",
+    },
+  ];
+};
+
+const statusStyles: Record<CareStatus, string> = {
+  Urgent: "bg-red-100 text-red-800",
+  "In progress": "bg-amber-100 text-amber-900",
+  Scheduled: "bg-sky-100 text-sky-800",
+  Done: "bg-emerald-100 text-emerald-800",
+};
+
+const severityStyles: Record<Severity, string> = {
+  Severe: "bg-red-500",
+  Moderate: "bg-amber-500",
+  Mild: "bg-emerald-500",
+  Healthy: "bg-emerald-500",
+};
+
+const statusCardStyles: Record<
+  CareStatus,
+  { card: string; count: string; dot: string; hint: string }
+> = {
+  Urgent: {
+    card: "border-rose-200 bg-gradient-to-br from-rose-50 to-white",
+    count: "text-rose-800",
+    dot: "bg-rose-500",
+    hint: "Needs attention",
+  },
+  "In progress": {
+    card: "border-amber-200 bg-gradient-to-br from-amber-50 to-white",
+    count: "text-amber-800",
+    dot: "bg-amber-500",
+    hint: "Being handled",
+  },
+  Scheduled: {
+    card: "border-sky-200 bg-gradient-to-br from-sky-50 to-white",
+    count: "text-sky-800",
+    dot: "bg-sky-500",
+    hint: "Upcoming check",
+  },
+  Done: {
+    card: "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white",
+    count: "text-emerald-800",
+    dot: "bg-emerald-500",
+    hint: "Completed",
+  },
+};
+
 const GuidancePage = () => {
   const navigate = useNavigate();
   const [scan, setScan] = useState<StoredResult | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [activeFilter, setActiveFilter] = useState<StatusFilter>("All");
 
   useEffect(() => {
-    const currentUser = getCurrentUser();
-
-    if (!currentUser) {
-      navigate("/login", { replace: true });
-      return;
-    }
-
     const stored = sessionStorage.getItem("silingScanResult");
 
     if (!stored) {
-      navigate("/", { replace: true });
       return;
     }
 
     try {
-      setScan(JSON.parse(stored) as StoredResult);
+      const parsed: unknown = JSON.parse(stored);
+      if (!isStoredResult(parsed)) {
+        throw new Error("Saved scan data is incomplete.");
+      }
+      setScan(parsed);
     } catch {
       sessionStorage.removeItem("silingScanResult");
-      navigate("/", { replace: true });
+      setLoadError(
+        "Saved scan data could not be read. Sample care plan data is shown.",
+      );
     }
-  }, [navigate]);
+  }, []);
 
-  if (!scan) {
-    return null;
-  }
-
-  const preventionSteps =
-    scan.result.status === "Healthy"
-      ? [
-          "Keep the soil evenly moist without overwatering.",
-          "Monitor leaf color and plant growth weekly for early signs of stress.",
-          "Use compost or a balanced chili fertilizer to support strong reproduction and fruit quality.",
-        ]
-      : [
-          "Remove and discard infected leaves and fruits immediately to reduce spread.",
-          "Improve spacing and airflow so leaves dry faster after rain or watering.",
-          "Clean pruning tools and avoid moving infected plants near healthy ones.",
-        ];
-
-  const cureSteps =
-    scan.result.status === "Healthy"
-      ? [
-          "Continue current care and keep nutrient levels balanced.",
-          "Routine checking is enough while the crop remains healthy.",
-          "Apply mulch and maintain good drainage to prevent later stress.",
-        ]
-      : [
-          "Apply a recommended fungicide or bactericide following the label instructions.",
-          "Use targeted treatment for affected areas, not the whole field unless needed.",
-          "Repeat treatment as advised by the product and continue monitoring after application.",
-        ];
+  const carePlan = scan ? getScanCarePlan(scan) : sampleCarePlan;
+  const visibleRows =
+    activeFilter === "All"
+      ? carePlan
+      : carePlan.filter((row) => row.status === activeFilter);
 
   return (
-    <div className="chili-page min-h-screen bg-gradient-to-br from-emerald-50 via-white to-amber-50 px-4 py-10 text-slate-900">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto w-full max-w-5xl space-y-5 pb-12">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-800 shadow-sm shadow-emerald-900/5">
+            <Sprout aria-hidden="true" size={24} strokeWidth={1.8} />
+          </span>
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-              Prevention & cure
+            <p className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-emerald-800">
+              SilingScan · Field care
             </p>
-            <h1 className="mt-2 text-3xl font-black text-slate-900">
-              What to do next
+            <h1 className="mt-0.5 font-serif text-3xl font-bold tracking-tight text-stone-900">
+              Care plan
             </h1>
           </div>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => navigate("/result")}
-              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700"
-            >
-              Back to result
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/")}
-              className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
-            >
-              Scan another image
-            </button>
-          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-800 bg-emerald-800 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-900"
+        >
+          Scan a plant
+          <ArrowUpRight aria-hidden="true" size={16} />
+        </button>
+      </header>
 
-        <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
-          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-emerald-100/60">
-            <img
-              src={scan.imageUrl}
-              alt="Uploaded chili plant"
-              className="h-full w-full object-cover"
-            />
-          </div>
+      {loadError ? (
+        <p className="workspace-error" role="alert">
+          {loadError}
+        </p>
+      ) : null}
 
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-lg shadow-emerald-100/60">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                Status
-              </p>
-              <h2 className="mt-2 text-3xl font-black text-slate-900">
-                {scan.result.status}
-              </h2>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                {scan.result.summary}
-              </p>
-            </div>
+      <div
+        className="flex items-center gap-3 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/80 px-4 py-3 text-xs leading-5 text-emerald-950 shadow-sm shadow-emerald-900/[0.025]"
+        role="note"
+      >
+        <span
+          aria-hidden="true"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-100 font-serif text-sm font-bold text-emerald-800"
+        >
+          i
+        </span>
+        <p>
+          {scan ? (
+            <>
+              <strong className="font-bold">Based on your latest scan.</strong>{" "}
+              Follow product labels and local agricultural guidance.
+            </>
+          ) : (
+            <>
+              <strong className="font-bold">Sample data shown.</strong> Your
+              real care plan will appear here after a scan is diagnosed by the
+              SilingScan model.
+            </>
+          )}
+        </p>
+      </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
-                <h3 className="text-lg font-bold text-emerald-900">
-                  Prevention steps
-                </h3>
-                <ul className="mt-4 space-y-3 text-sm leading-6 text-emerald-950">
-                  {preventionSteps.map((step) => (
-                    <li key={step} className="flex gap-2">
-                      <span className="mt-2 h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                      <span>{step}</span>
-                    </li>
-                  ))}
-                </ul>
+      <dl className="grid grid-cols-2 gap-2.5">
+        {summaryStatuses.map((status) => {
+          const count = carePlan.filter((row) => row.status === status).length;
+          const styles = statusCardStyles[status];
+          return (
+            <div
+              key={status}
+              className={`rounded-xl border px-4 py-3 shadow-sm shadow-stone-900/[0.025] transition-transform hover:-translate-y-0.5 ${styles.card}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <dt className="flex items-center gap-2 text-xs font-medium text-stone-600">
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 rounded-full ${styles.dot}`}
+                  />
+                  {status}
+                </dt>
+                <dd
+                  className={`font-serif text-2xl font-bold leading-6 ${styles.count}`}
+                >
+                  {count}
+                </dd>
               </div>
-
-              <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
-                <h3 className="text-lg font-bold text-amber-900">
-                  Cure & treatment
-                </h3>
-                <ul className="mt-4 space-y-3 text-sm leading-6 text-amber-950">
-                  {cureSteps.map((step) => (
-                    <li key={step} className="flex gap-2">
-                      <span className="mt-2 h-2.5 w-2.5 rounded-full bg-amber-500" />
-                      <span>{step}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <p className="mt-1.5 text-[11px] text-stone-500">{styles.hint}</p>
             </div>
+          );
+        })}
+      </dl>
 
-            <div className="rounded-3xl border border-slate-200 bg-slate-900 p-5 text-white shadow-xl shadow-slate-200">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-                Recommended next step
-              </p>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-100">
-                {scan.result.recommendations.map((item) => (
-                  <li key={item} className="flex gap-2">
-                    <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="font-serif text-lg font-bold text-stone-900">
+              Care tasks
+            </h2>
+            <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600">
+              {visibleRows.length} of {carePlan.length}
+            </span>
           </div>
+          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-stone-400">
+            Filter by status
+          </span>
+        </div>
+        <div
+          className="flex flex-wrap gap-1.5"
+          aria-label="Filter care plan by status"
+        >
+          {statusFilters.map((status) => (
+            <button
+              key={status}
+              type="button"
+              aria-pressed={activeFilter === status}
+              onClick={() => setActiveFilter(status)}
+              className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${
+                activeFilter === status
+                  ? "border-stone-900 bg-stone-900 text-white shadow-sm shadow-stone-900/15"
+                  : "border-stone-300 bg-white text-stone-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-900"
+              }`}
+            >
+              {status}
+            </button>
+          ))}
         </div>
       </div>
+
+      <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm shadow-stone-900/[0.04]">
+        <Table
+          aria-label="Care plan for chili plants"
+          className="min-w-[880px] table-fixed text-xs"
+        >
+          <TableHeader>
+            <TableRow className="bg-stone-100 hover:bg-stone-100">
+              <TableHead className="w-[14%] px-3 py-2.5 font-medium text-stone-600">
+                Plant
+              </TableHead>
+              <TableHead className="w-[15%] px-3 py-2.5 font-medium text-stone-600">
+                Disease
+              </TableHead>
+              <TableHead className="w-[11%] px-3 py-2.5 font-medium text-stone-600">
+                Severity
+              </TableHead>
+              <TableHead className="w-[25%] px-3 py-2.5 font-medium text-stone-600">
+                What to do
+              </TableHead>
+              <TableHead className="w-[12%] px-3 py-2.5 font-medium text-stone-600">
+                How often
+              </TableHead>
+              <TableHead className="w-[12%] px-3 py-2.5 font-medium text-stone-600">
+                Next due
+              </TableHead>
+              <TableHead className="w-[11%] px-3 py-2.5 font-medium text-stone-600">
+                Status
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleRows.length > 0 ? (
+              visibleRows.map((row) => (
+                <TableRow
+                  key={`${row.plant}-${row.disease}`}
+                  className="align-top hover:bg-emerald-50/35"
+                >
+                  <TableCell className="whitespace-normal px-3 py-3 font-medium leading-4 text-stone-800">
+                    {row.plant}
+                  </TableCell>
+                  <TableCell className="whitespace-normal px-3 py-3 leading-4 text-stone-800">
+                    {row.disease}
+                  </TableCell>
+                  <TableCell className="px-3 py-3 text-stone-800">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        aria-hidden="true"
+                        className={`h-2 w-2 shrink-0 rounded-full ${severityStyles[row.severity]}`}
+                      />
+                      {row.severity}
+                    </span>
+                  </TableCell>
+                  <TableCell className="whitespace-normal px-3 py-3 leading-4 text-stone-700">
+                    {row.instructions}
+                  </TableCell>
+                  <TableCell className="whitespace-normal px-3 py-3 leading-4 text-stone-700">
+                    {row.frequency}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap px-3 py-3 text-stone-700">
+                    {row.nextDue}
+                  </TableCell>
+                  <TableCell className="px-3 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium leading-4 ${statusStyles[row.status]}`}
+                    >
+                      {row.status}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="whitespace-normal px-4 py-8 text-center text-stone-500"
+                >
+                  No care plan items with this status.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </section>
+
+      <p className="text-[11px] leading-5 text-stone-500">
+        Treatment notes are general guidance. Always follow product labels and
+        local agriculture office advice.
+      </p>
     </div>
   );
 };
